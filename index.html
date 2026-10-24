@@ -78,7 +78,13 @@
     padding: 18px;
     display: flex; flex-direction: column; gap: 14px;
   }
-  header { display: flex; flex-direction: column; gap: 2px; }
+  header { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
+  .titles { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  #closeBtn {
+    display: none; flex: none; width: 34px; height: 34px; border-radius: 50%;
+    border: 1px solid var(--border); background: var(--seg-on); color: var(--fg);
+    font: 500 22px/1 var(--font-body); cursor: pointer; align-items: center; justify-content: center;
+  }
   .eyebrow { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
   h1 { margin: 0; font: 800 24px/1.1 var(--font-display); letter-spacing: -0.01em; text-wrap: balance; }
 
@@ -125,10 +131,12 @@
 
   .help { margin: 0; font-size: 12px; color: var(--muted); }
   #toggleBtn { display: none; }
+  #panel.open #toggleBtn { background: var(--accent); color: var(--accent-fg); border-color: transparent; }
 
   /* Pantallas pequeñas o bajas: el panel plegado se reduce a estado y tres botones */
   @media (max-width: 719px), (max-height: 560px) {
     #toggleBtn { display: block; }
+    #panel.open #closeBtn { display: inline-flex; }
     #panel { padding: 12px 14px; gap: 10px; }
     h1 { font-size: 20px; }
     #panel:not(.open) header, #panel:not(.open) .field, #panel:not(.open) .score, #panel:not(.open) .help,
@@ -157,8 +165,11 @@
 <div id="ui">
   <aside id="panel" aria-label="Controles de la partida">
     <header>
-      <span class="eyebrow">Tú contra la máquina</span>
-      <h1>Cuatro en Raya 3D</h1>
+      <div class="titles">
+        <span class="eyebrow">Tú contra la máquina</span>
+        <h1>Cuatro en Raya 3D</h1>
+      </div>
+      <button id="closeBtn" type="button" aria-label="Cerrar ajustes" title="Cerrar ajustes">&times;</button>
     </header>
 
     <div class="status" role="status" aria-live="polite">
@@ -172,7 +183,7 @@
       <button id="undoBtn" type="button">Deshacer</button>
       <button id="camBtn" type="button">Cámara</button>
       <button id="soundBtn" type="button" aria-pressed="true">Sonido</button>
-      <button id="toggleBtn" type="button">Ajustes</button>
+      <button id="toggleBtn" type="button" aria-expanded="false" aria-controls="panel">Ajustes</button>
     </div>
 
     <div class="field">
@@ -1011,7 +1022,14 @@ $('soundBtn').addEventListener('click', () => {
   if (sfx.enabled) sfx.play('tick');
 });
 updateSoundBtn();
-$('toggleBtn').addEventListener('click', () => $('panel').classList.toggle('open'));
+const compactMq = matchMedia('(max-width: 719px), (max-height: 560px)');
+function setPanelOpen(open) {
+  $('panel').classList.toggle('open', open);
+  $('toggleBtn').textContent = open ? 'Cerrar' : 'Ajustes';
+  $('toggleBtn').setAttribute('aria-expanded', String(open));
+}
+$('toggleBtn').addEventListener('click', () => setPanelOpen(!$('panel').classList.contains('open')));
+$('closeBtn').addEventListener('click', () => setPanelOpen(false));
 $('level').addEventListener('change', (e) => { game.level = Number(e.target.value); updateUi(); });
 $('modeSeg').addEventListener('click', (e) => {
   const b = e.target.closest('button');
@@ -1069,7 +1087,11 @@ renderer.domElement.addEventListener('pointermove', (ev) => {
   updateGhost();
 });
 renderer.domElement.addEventListener('pointerleave', () => { hoverCol = -1; updateGhost(); });
-renderer.domElement.addEventListener('pointerdown', (ev) => { down = { x: ev.clientX, y: ev.clientY, t: performance.now() }; });
+renderer.domElement.addEventListener('pointerdown', (ev) => {
+  // En pantallas pequeñas, tocar el tablero con los ajustes abiertos solo los cierra; no suelta ficha.
+  if (compactMq.matches && $('panel').classList.contains('open')) { setPanelOpen(false); down = null; return; }
+  down = { x: ev.clientX, y: ev.clientY, t: performance.now() };
+});
 renderer.domElement.addEventListener('pointerup', (ev) => {
   if (!down) return;
   const moved = Math.hypot(ev.clientX - down.x, ev.clientY - down.y);
