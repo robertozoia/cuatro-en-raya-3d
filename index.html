@@ -683,7 +683,7 @@ function buildClassic() {
     cellPos: (c, r) => new THREE.Vector3(cx(c), cy(r), 0),
     dropY: bh + 0.7,
     discGeo,
-    fitCenter: new THREE.Vector3(0, 3.5, 0), fitHalfW: 4.0, fitHalfH: 3.9, fitDepth: 1.0,
+    fitBox: new THREE.Box3(new THREE.Vector3(-bw / 2, 0, -0.9), new THREE.Vector3(bw / 2, bh + 1.1, 0.9)),
     camDir: new THREE.Vector3(0, 0.16, 1).normalize(),
   };
 }
@@ -723,8 +723,8 @@ function buildCube() {
     cellPos: (c, r) => new THREE.Vector3(px(c), baseH + (r + 0.5) * ch, pz(c)),
     dropY: baseH + pegH + 0.6,
     discGeo, pegs, baseTop: baseH,
-    fitCenter: new THREE.Vector3(0, 1.0, 0), fitHalfW: 4.2, fitHalfH: 3.0, fitDepth: 3.0,
-    camDir: new THREE.Vector3(6.8, 4.5, 8.4).normalize(),
+    fitBox: new THREE.Box3(new THREE.Vector3(-baseSize / 2, 0, -baseSize / 2), new THREE.Vector3(baseSize / 2, baseH + pegH + 1.0, baseSize / 2)),
+    camDir: new THREE.Vector3(6.8, 6.5, 8.4).normalize(),
   };
 }
 
@@ -763,25 +763,43 @@ function setMode(mode, keepCamera) {
 }
 
 function resetCamera() {
-  controls.target.copy(layout.fitCenter);
-  camera.position.copy(layout.fitCenter).add(layout.camDir.clone().multiplyScalar(10));
+  const center = layout.fitBox.getCenter(new THREE.Vector3());
+  controls.target.copy(center);
+  camera.position.copy(center).add(layout.camDir.clone().multiplyScalar(10));
   fitCamera(true);
+}
+
+// Distancia mínima, mirando desde `dir`, para que las 8 esquinas de la caja del tablero queden dentro del encuadre.
+function fitDistance(dir) {
+  const half = THREE.MathUtils.degToRad(camera.fov / 2);
+  const tanV = Math.tan(half), tanH = tanV * camera.aspect;
+  const fwd = dir.clone().negate();
+  const right = new THREE.Vector3().crossVectors(fwd, new THREE.Vector3(0, 1, 0)).normalize();
+  const up = new THREE.Vector3().crossVectors(right, fwd);
+  const center = layout.fitBox.getCenter(new THREE.Vector3());
+  const mn = layout.fitBox.min, mx = layout.fitBox.max;
+  let d = 0;
+  for (let i = 0; i < 8; i++) {
+    const p = new THREE.Vector3(i & 1 ? mx.x : mn.x, i & 2 ? mx.y : mn.y, i & 4 ? mx.z : mn.z).sub(center);
+    const along = p.dot(dir);
+    d = Math.max(d, Math.abs(p.dot(right)) / tanH + along, Math.abs(p.dot(up)) / tanV + along);
+  }
+  return Math.max(d * 1.04, controls.minDistance);
 }
 
 // Coloca la cámara a la distancia justa para que el tablero entero quepa en el área libre.
 function fitCamera(force) {
   if (!layout) return;
-  const half = THREE.MathUtils.degToRad(camera.fov / 2);
-  const hHalf = Math.atan(Math.tan(half) * camera.aspect);
-  const dist = Math.max(layout.fitHalfW / Math.tan(hHalf), layout.fitHalfH / Math.tan(half)) * 1.06 + layout.fitDepth;
+  const center = layout.fitBox.getCenter(new THREE.Vector3());
   const dir = camera.position.clone().sub(controls.target);
   if (dir.lengthSq() < 1e-6) dir.copy(layout.camDir);
   dir.normalize();
+  const dist = fitDistance(dir);
   const cur = camera.position.distanceTo(controls.target);
   const keepZoom = !force && Math.abs(cur - lastFitDist) > 0.05; // el usuario ha hecho zoom: no se lo deshacemos
   lastFitDist = dist;
-  controls.target.copy(layout.fitCenter);
-  camera.position.copy(layout.fitCenter).add(dir.multiplyScalar(keepZoom ? cur : dist));
+  controls.target.copy(center);
+  camera.position.copy(center).add(dir.multiplyScalar(keepZoom ? cur : dist));
   controls.update();
 }
 let lastFitDist = 0;
