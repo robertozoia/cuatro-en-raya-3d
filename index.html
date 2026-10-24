@@ -1,0 +1,1009 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+</head>
+<body>
+<title>Cuatro en Raya 3D</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+  /* Layout: full-bleed WebGL stage with one floating glass console (left on desktop, bottom sheet on phones). */
+  :root {
+    --bg: #e9ecf4;
+    --fg: #171a2e;
+    --muted: #5b6080;
+    --panel: rgba(250, 251, 255, 0.82);
+    --seg: rgba(23, 26, 46, 0.07);
+    --seg-on: #ffffff;
+    --border: rgba(23, 26, 46, 0.12);
+    --accent: #2d55d9;
+    --accent-fg: #ffffff;
+    --p1: #f28c1e;
+    --p2: #1aa89c;
+    --scene: #e3e7f1;
+    --ground: #d3d8e7;
+    --board: #2b4fd2;
+    --shadow: 0 14px 40px rgba(23, 26, 46, 0.16);
+    --font-display: 'Bricolage Grotesque', 'Avenir Next', 'Helvetica Neue', system-ui, sans-serif;
+    --font-body: 'IBM Plex Sans', 'Helvetica Neue', system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0e1020; --fg: #eceef9; --muted: #9ba0c4;
+      --panel: rgba(21, 23, 42, 0.8); --seg: rgba(236, 238, 249, 0.08); --seg-on: #2a2e4e;
+      --border: rgba(236, 238, 249, 0.12); --accent: #7f9dff; --accent-fg: #0e1020;
+      --p1: #ffa23a; --p2: #2fd3c5; --scene: #10122a; --ground: #181b37; --board: #2345a8;
+      --shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0e1020; --fg: #eceef9; --muted: #9ba0c4;
+    --panel: rgba(21, 23, 42, 0.8); --seg: rgba(236, 238, 249, 0.08); --seg-on: #2a2e4e;
+    --border: rgba(236, 238, 249, 0.12); --accent: #7f9dff; --accent-fg: #0e1020;
+    --p1: #ffa23a; --p2: #2fd3c5; --scene: #10122a; --ground: #181b37; --board: #2345a8;
+    --shadow: 0 14px 40px rgba(0, 0, 0, 0.45);
+    color-scheme: dark;
+  }
+
+  html, body { height: 100%; }
+  body {
+    margin: 0; overflow: hidden;
+    background: var(--bg); color: var(--fg);
+    font: 14px/1.45 var(--font-body);
+    -webkit-font-smoothing: antialiased;
+  }
+  #stage { position: fixed; inset: 0; }
+  #stage canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+
+  #ui {
+    position: fixed; inset: 0; pointer-events: none;
+    display: flex; align-items: flex-start; justify-content: flex-start;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    padding-block: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-bottom, 0px));
+    box-sizing: border-box;
+  }
+  #panel {
+    pointer-events: auto;
+    width: 304px; max-width: 100%; max-height: 100%; overflow: auto;
+    box-sizing: border-box;
+    background: var(--panel);
+    -webkit-backdrop-filter: blur(16px) saturate(1.3); backdrop-filter: blur(16px) saturate(1.3);
+    border: 1px solid var(--border); border-radius: 16px;
+    box-shadow: var(--shadow);
+    padding: 18px;
+    display: flex; flex-direction: column; gap: 14px;
+  }
+  header { display: flex; flex-direction: column; gap: 2px; }
+  .eyebrow { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 500; }
+  h1 { margin: 0; font: 800 24px/1.1 var(--font-display); letter-spacing: -0.01em; text-wrap: balance; }
+
+  .status {
+    display: grid; grid-template-columns: auto 1fr; column-gap: 10px; align-items: center;
+    padding: 10px 12px; border-radius: 10px; background: var(--seg);
+  }
+  .chip { width: 14px; height: 14px; border-radius: 50%; background: var(--p1); box-shadow: inset 0 -2px 0 rgba(0,0,0,.18); }
+  .chip.p2 { background: var(--p2); }
+  .chip.off { background: var(--muted); opacity: .5; }
+  #msg { font-weight: 600; font-size: 15px; }
+  #info { grid-column: 2; color: var(--muted); font-size: 12px; min-height: 1.3em; font-variant-numeric: tabular-nums; }
+
+  .field { display: flex; flex-direction: column; gap: 6px; }
+  .field > label, .field > .lbl { font-size: 12px; font-weight: 600; color: var(--muted); }
+  .seg { display: flex; gap: 3px; padding: 3px; border-radius: 10px; background: var(--seg); }
+  .seg button {
+    flex: 1; min-width: 0; border: 0; border-radius: 8px; padding: 7px 6px;
+    background: transparent; color: var(--fg); font: 500 13px var(--font-body); cursor: pointer;
+  }
+  .seg button.on { background: var(--seg-on); box-shadow: 0 1px 3px rgba(0,0,0,.12); font-weight: 600; }
+  select {
+    width: 100%; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border);
+    background: var(--seg-on); color: var(--fg); font: 500 13px var(--font-body);
+  }
+  .hint { margin: 0; font-size: 12px; color: var(--muted); }
+
+  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .actions button {
+    border: 1px solid var(--border); border-radius: 10px; padding: 9px 10px; cursor: pointer;
+    background: var(--seg-on); color: var(--fg); font: 600 13px var(--font-body);
+  }
+  .actions button.primary { grid-column: 1 / -1; background: var(--accent); color: var(--accent-fg); border-color: transparent; }
+  .actions button:disabled { opacity: .45; cursor: default; }
+  button:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .score { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0; }
+  .score div { display: flex; flex-direction: column; align-items: center; padding: 8px 4px; border-radius: 10px; background: var(--seg); }
+  .score dt { font-size: 11px; color: var(--muted); letter-spacing: .04em; text-transform: uppercase; }
+  .score dd { margin: 0; font: 800 22px/1.1 var(--font-display); font-variant-numeric: tabular-nums; }
+  .score .p1 dd { color: var(--p1); }
+  .score .p2 dd { color: var(--p2); }
+
+  .help { margin: 0; font-size: 12px; color: var(--muted); }
+  #toggleBtn { display: none; }
+
+  @media (max-width: 719px) {
+    #ui { align-items: flex-end; }
+    #panel { width: 100%; padding: 14px; gap: 10px; max-height: 70vh; }
+    h1 { font-size: 20px; }
+    #panel:not(.open) .field, #panel:not(.open) .score, #panel:not(.open) .help { display: none; }
+    #toggleBtn { display: block; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div id="stage"><canvas id="c" aria-label="Tablero tridimensional de cuatro en raya"></canvas></div>
+
+<div id="ui">
+  <aside id="panel" aria-label="Controles de la partida">
+    <header>
+      <span class="eyebrow">Tú contra la máquina</span>
+      <h1>Cuatro en Raya 3D</h1>
+    </header>
+
+    <div class="status" role="status" aria-live="polite">
+      <span class="chip" id="chip"></span>
+      <span id="msg">Tu turno</span>
+      <span id="info"></span>
+    </div>
+
+    <div class="actions">
+      <button id="newBtn" class="primary" type="button">Nueva partida</button>
+      <button id="undoBtn" type="button">Deshacer</button>
+      <button id="toggleBtn" type="button">Ajustes</button>
+      <button id="camBtn" type="button">Centrar cámara</button>
+    </div>
+
+    <div class="field">
+      <span class="lbl">Tablero</span>
+      <div class="seg" id="modeSeg" role="group" aria-label="Tipo de tablero">
+        <button type="button" data-v="classic" class="on">Clásico 7×6</button>
+        <button type="button" data-v="cube">Cubo 4×4×4</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label for="level">Dificultad</label>
+      <select id="level">
+        <option value="1">1 · Principiante</option>
+        <option value="2">2 · Fácil</option>
+        <option value="3" selected>3 · Medio</option>
+        <option value="4">4 · Difícil</option>
+        <option value="5">5 · Experto</option>
+      </select>
+      <p class="hint" id="levelHint"></p>
+    </div>
+
+    <div class="field">
+      <span class="lbl">Quién empieza</span>
+      <div class="seg" id="starterSeg" role="group" aria-label="Quién empieza">
+        <button type="button" data-v="human" class="on">Tú</button>
+        <button type="button" data-v="ai">Máquina</button>
+        <button type="button" data-v="alt">Alternar</button>
+      </div>
+    </div>
+
+    <dl class="score">
+      <div class="p1"><dt>Tú</dt><dd id="sW">0</dd></div>
+      <div><dt>Empates</dt><dd id="sD">0</dd></div>
+      <div class="p2"><dt>Máquina</dt><dd id="sL">0</dd></div>
+    </dl>
+
+    <p class="help">Arrastra para girar la escena y usa la rueda o la pinza para acercar. Toca una columna para soltar tu ficha. En el tablero clásico también sirven las teclas 1 a 7.</p>
+  </aside>
+</div>
+
+<script>
+// ENGINE-BEGIN
+// Motor genérico: tablero W×H×D con gravedad en Y. Funciona para el 7×6 clásico (D=1) y para el cubo 4×4×4.
+function createEngine(cfg) {
+  const W = cfg.W, H = cfg.H, D = cfg.D, NC = W * D, N = NC * H;
+  const WIN = 1000000, INF = 1000000000;
+  const TIMEOUT = { timeout: true };
+  const idx = (x, y, z) => (x + z * W) * H + y;
+
+  // Todas las líneas de 4 celdas en cualquier dirección (69 en el clásico, 76 en el cubo).
+  const lines = [], cellLines = [];
+  for (let i = 0; i < N; i++) cellLines.push([]);
+  const dirs = [];
+  for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+    if (dx === 0 && dy === 0 && dz === 0) continue;
+    if (D === 1 && dz !== 0) continue;
+    const first = dx !== 0 ? dx : (dy !== 0 ? dy : dz);
+    if (first < 0) continue;
+    dirs.push([dx, dy, dz]);
+  }
+  for (let z = 0; z < D; z++) for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    for (const d of dirs) {
+      const ex = x + 3 * d[0], ey = y + 3 * d[1], ez = z + 3 * d[2];
+      if (ex < 0 || ex >= W || ey < 0 || ey >= H || ez < 0 || ez >= D) continue;
+      const ln = [];
+      for (let i = 0; i < 4; i++) ln.push(idx(x + i * d[0], y + i * d[1], z + i * d[2]));
+      const li = lines.length;
+      lines.push(ln);
+      for (const c of ln) cellLines[c].push(li);
+    }
+  }
+  const flat = Int16Array.from(lines.flat());
+
+  const colDist = (c) => {
+    const x = c % W, z = Math.floor(c / W);
+    return (x - (W - 1) / 2) ** 2 + (z - (D - 1) / 2) ** 2;
+  };
+  const colOrder = Array.from({ length: NC }, (_, i) => i).sort((a, b) => colDist(a) - colDist(b));
+  const SCORE = [0, 1, 6, 40];
+
+  let cells, heights, filled, nodes, deadline;
+
+  function winAt(cell, p) {
+    const ls = cellLines[cell];
+    for (let k = 0; k < ls.length; k++) {
+      const b = ls[k] * 4;
+      if (cells[flat[b]] === p && cells[flat[b + 1]] === p && cells[flat[b + 2]] === p && cells[flat[b + 3]] === p) return ls[k];
+    }
+    return -1;
+  }
+
+  function evaluate(p) {
+    let s = 0;
+    const o = 3 - p;
+    for (let b = 0; b < flat.length; b += 4) {
+      let mine = 0, theirs = 0;
+      for (let i = 0; i < 4; i++) {
+        const v = cells[flat[b + i]];
+        if (v === p) mine++; else if (v === o) theirs++;
+      }
+      if (mine && theirs) continue;
+      if (mine) s += SCORE[mine]; else if (theirs) s -= SCORE[theirs];
+    }
+    return s;
+  }
+
+  function negamax(depth, alpha, beta, p, ply) {
+    if ((++nodes & 2047) === 0 && Date.now() > deadline) throw TIMEOUT;
+    if (filled === N) return 0;
+    if (depth === 0) return evaluate(p);
+    let best = -INF;
+    for (let k = 0; k < NC; k++) {
+      const c = colOrder[k];
+      if (heights[c] >= H) continue;
+      const cell = c * H + heights[c];
+      cells[cell] = p; heights[c]++; filled++;
+      let s;
+      if (winAt(cell, p) >= 0) s = WIN - ply;
+      else s = -negamax(depth - 1, -beta, -alpha, 3 - p, ply + 1);
+      cells[cell] = 0; heights[c]--; filled--;
+      if (s > best) best = s;
+      if (best > alpha) alpha = best;
+      if (alpha >= beta) break;
+    }
+    return best;
+  }
+
+  const LEVELS = {
+    1: { random: true },
+    2: { maxDepth: 2, timeMs: 5000, tie: 10 },
+    3: { maxDepth: 4, timeMs: 5000, tie: 3 },
+    4: { maxDepth: 8, timeMs: 900, tie: 0 },
+    5: { maxDepth: 24, timeMs: 2200, tie: 0 },
+  };
+
+  function chooseMove(cellsIn, heightsIn, p, level) {
+    cells = Int8Array.from(cellsIn);
+    heights = Int16Array.from(heightsIn);
+    filled = 0;
+    for (let i = 0; i < N; i++) if (cells[i]) filled++;
+    nodes = 0;
+    const t0 = Date.now();
+    const legal = colOrder.filter((c) => heights[c] < H);
+    if (!legal.length) return { col: -1, depth: 0, nodes: 0, ms: 0 };
+    const o = 3 - p;
+    const P = LEVELS[level] || LEVELS[3];
+    const result = (col, depth, score) => ({ col, depth, score, nodes, ms: Date.now() - t0 });
+
+    const immediate = (pl) => {
+      for (const c of legal) {
+        const cell = c * H + heights[c];
+        cells[cell] = pl;
+        const w = winAt(cell, pl) >= 0;
+        cells[cell] = 0;
+        if (w) return c;
+      }
+      return -1;
+    };
+
+    if (P.random) {
+      const w = immediate(p);
+      if (w >= 0) return result(w, 1, WIN);
+      const b = immediate(o);
+      if (b >= 0 && Math.random() < 0.5) return result(b, 1, 0);
+      return result(legal[Math.floor(Math.random() * legal.length)], 1, 0);
+    }
+
+    deadline = t0 + P.timeMs;
+    let rootOrder = legal.slice(), bestCol = legal[0], bestScore = 0, depthDone = 0;
+    const remaining = N - filled;
+    for (let depth = 1; depth <= Math.min(P.maxDepth, remaining); depth++) {
+      const scored = [];
+      let iterBest = -INF;
+      try {
+        for (const c of rootOrder) {
+          const cell = c * H + heights[c];
+          cells[cell] = p; heights[c]++; filled++;
+          let s;
+          if (winAt(cell, p) >= 0) s = WIN - 1;
+          else s = -negamax(depth - 1, -INF, -(iterBest - 1), o, 1);
+          cells[cell] = 0; heights[c]--; filled--;
+          scored.push([c, s]);
+          if (s > iterBest) iterBest = s;
+        }
+      } catch (e) {
+        if (e !== TIMEOUT) throw e;
+        break;
+      }
+      scored.sort((a, b) => b[1] - a[1]);
+      rootOrder = scored.map((x) => x[0]);
+      const ties = scored.filter((x) => x[1] >= iterBest - P.tie).map((x) => x[0]);
+      bestCol = ties[Math.floor(Math.random() * ties.length)];
+      bestScore = iterBest;
+      depthDone = depth;
+      if (Math.abs(iterBest) >= WIN - 1000) break;
+    }
+    return result(bestCol, depthDone, bestScore);
+  }
+
+  // Comprobación de victoria para el hilo principal: devuelve las 4 celdas ganadoras o null.
+  function findWin(cellsIn, cell, p) {
+    cells = cellsIn;
+    const li = winAt(cell, p);
+    return li >= 0 ? lines[li] : null;
+  }
+
+  return { W, H, D, NC, N, lines, chooseMove, findWin };
+}
+
+function workerMain() {
+  const engines = {};
+  self.onmessage = (e) => {
+    const m = e.data;
+    const key = m.cfg.W + 'x' + m.cfg.H + 'x' + m.cfg.D;
+    const eng = engines[key] || (engines[key] = createEngine(m.cfg));
+    const res = eng.chooseMove(m.cells, m.heights, m.player, m.level);
+    res.id = m.id;
+    self.postMessage(res);
+  };
+}
+// ENGINE-END
+</script>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const $ = (id) => document.getElementById(id);
+const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)');
+const token = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+const LEVEL_HINTS = {
+  1: 'Juega casi al azar. Solo remata si tiene cuatro a tiro.',
+  2: 'Mira dos jugadas por delante.',
+  3: 'Mira cuatro jugadas por delante.',
+  4: 'Busca hasta ocho jugadas, con un segundo de reflexión.',
+  5: 'Profundiza todo lo que puede en poco más de dos segundos.',
+};
+
+// ---------- Hilo de la IA ----------
+let worker = null, fallbackEngines = {};
+const pending = new Map();
+let msgId = 0;
+try {
+  const src = createEngine.toString() + '\n' + workerMain.toString() + '\nworkerMain();';
+  worker = new Worker(URL.createObjectURL(new Blob([src], { type: 'text/javascript' })));
+  worker.onmessage = (e) => { const r = pending.get(e.data.id); if (r) { pending.delete(e.data.id); r(e.data); } };
+  worker.onerror = () => { worker = null; };
+} catch (e) { worker = null; }
+
+function think(payload) {
+  return new Promise((resolve) => {
+    const id = ++msgId;
+    if (worker) {
+      pending.set(id, resolve);
+      worker.postMessage({ id, ...payload });
+    } else {
+      setTimeout(() => {
+        const key = payload.cfg.W + 'x' + payload.cfg.H + 'x' + payload.cfg.D;
+        const eng = fallbackEngines[key] || (fallbackEngines[key] = createEngine(payload.cfg));
+        resolve(eng.chooseMove(payload.cells, payload.heights, payload.player, payload.level));
+      }, 30);
+    }
+  });
+}
+
+// ---------- Escena ----------
+const stage = $('stage');
+const renderer = new THREE.WebGLRenderer({ canvas: $('c'), antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 200);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.enablePan = false;
+controls.maxPolarAngle = Math.PI / 2 - 0.03;
+
+const hemi = new THREE.HemisphereLight(0xffffff, 0x4a4f70, 0.9);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xffffff, 2.6);
+sun.position.set(6, 12, 7);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.camera.near = 1; sun.shadow.camera.far = 40;
+sun.shadow.camera.left = -9; sun.shadow.camera.right = 9; sun.shadow.camera.top = 9; sun.shadow.camera.bottom = -9;
+sun.shadow.bias = -0.0005;
+scene.add(sun);
+const fill = new THREE.DirectionalLight(0xffffff, 0.7);
+fill.position.set(-7, 5, -6);
+scene.add(fill);
+
+// Textura procedural para las fichas: grano fino y vetas radiales, usada como mapa de relieve y de rugosidad.
+function makeDiscTexture() {
+  const S = 512;
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const ctx = cv.getContext('2d');
+  const img = ctx.createImageData(S, S);
+  const d = img.data;
+  const streak = new Float32Array(S);
+  for (let x = 0; x < S; x++) streak[x] = Math.random();
+  for (let pass = 0; pass < 2; pass++) {
+    for (let x = 0; x < S; x++) streak[x] = (streak[(x + S - 1) % S] + streak[x] * 2 + streak[(x + 1) % S]) / 4;
+  }
+  for (let y = 0; y < S; y++) for (let x = 0; x < S; x++) {
+    const v = 150 + 105 * (0.6 * streak[x] + 0.4 * Math.random());
+    const i = (y * S + x) * 4;
+    d[i] = d[i + 1] = d[i + 2] = v;
+    d[i + 3] = 255;
+  }
+  ctx.putImageData(img, 0, 0);
+  const tex = new THREE.CanvasTexture(cv);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(4, 1);
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return tex;
+}
+const discTex = makeDiscTexture();
+
+// Ficha torneada: centro rebajado, tres anillos en relieve y reborde elevado. r0 es el radio del agujero central.
+function discGeometry(r0, R, T) {
+  const span = R - r0;
+  const top = [
+    [r0, T - 0.07], [r0 + span * 0.2, T - 0.07],
+    [r0 + span * 0.28, T - 0.02], [r0 + span * 0.36, T - 0.07],
+    [r0 + span * 0.46, T - 0.02], [r0 + span * 0.54, T - 0.07],
+    [r0 + span * 0.64, T - 0.02], [r0 + span * 0.72, T - 0.07],
+    [r0 + span * 0.84, T], [r0 + span * 0.95, T], [R, T - 0.04],
+  ];
+  const pts = [];
+  for (const [r, y] of top) pts.push(new THREE.Vector2(r, -y));
+  for (let i = top.length - 1; i >= 0; i--) pts.push(new THREE.Vector2(top[i][0], top[i][1]));
+  if (r0 > 0) pts.push(new THREE.Vector2(r0, -(T - 0.07))); // pared interior solo si hay agujero
+  return new THREE.LatheGeometry(pts, 72);
+}
+
+const discMat = () => new THREE.MeshPhysicalMaterial({
+  roughness: 0.55, roughnessMap: discTex, bumpMap: discTex, bumpScale: 0.012,
+  clearcoat: 0.6, clearcoatRoughness: 0.25,
+});
+const mats = {
+  board: new THREE.MeshPhysicalMaterial({ roughness: 0.45, clearcoat: 0.5, clearcoatRoughness: 0.3 }),
+  peg: new THREE.MeshStandardMaterial({ color: 0xdfe2ec, metalness: 0.3, roughness: 0.4 }),
+  p1: discMat(),
+  p2: discMat(),
+  ghost: new THREE.MeshStandardMaterial({ transparent: true, opacity: 0.45, depthWrite: false }),
+  hit: new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
+  ground: new THREE.MeshStandardMaterial({ roughness: 1 }),
+  win: new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 }),
+};
+
+const ground = new THREE.Mesh(new THREE.CircleGeometry(40, 64), mats.ground);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+function applyTheme() {
+  const bg = new THREE.Color(token('--scene'));
+  scene.background = bg;
+  scene.fog = new THREE.Fog(bg, 22, 60);
+  mats.ground.color.set(token('--ground'));
+  mats.board.color.set(token('--board'));
+  mats.p1.color.set(token('--p1'));
+  mats.p2.color.set(token('--p2'));
+}
+applyTheme();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
+new MutationObserver(applyTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+// ---------- Tableros ----------
+const boardGroup = new THREE.Group();
+const discGroup = new THREE.Group();
+scene.add(boardGroup, discGroup);
+let hitboxes = [];
+let layout = null;
+
+function disposeGroup(g) {
+  g.traverse((o) => { if (o.geometry) o.geometry.dispose(); });
+  g.clear();
+}
+
+function buildClassic() {
+  const W = 7, H = 6, s = 1, m = 0.35, depth = 0.6;
+  const bw = W * s + 2 * m, bh = H * s + 2 * m;
+  const cx = (c) => (c - (W - 1) / 2) * s;
+  const cy = (r) => m + (r + 0.5) * s;
+
+  const shape = new THREE.Shape();
+  shape.moveTo(-bw / 2, 0); shape.lineTo(bw / 2, 0); shape.lineTo(bw / 2, bh); shape.lineTo(-bw / 2, bh); shape.closePath();
+  for (let c = 0; c < W; c++) for (let r = 0; r < H; r++) {
+    const hole = new THREE.Path();
+    hole.absarc(cx(c), cy(r), 0.45, 0, Math.PI * 2, true);
+    shape.holes.push(hole);
+  }
+  const geo = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, curveSegments: 28 });
+  geo.translate(0, 0, -depth / 2);
+  const board = new THREE.Mesh(geo, mats.board);
+  board.castShadow = board.receiveShadow = true;
+  boardGroup.add(board);
+
+  const footGeo = new THREE.BoxGeometry(0.7, 0.55, 1.8);
+  for (const sx of [-1, 1]) {
+    const f = new THREE.Mesh(footGeo, mats.board);
+    f.position.set(sx * (bw / 2 - 0.35), 0.275, 0);
+    f.castShadow = f.receiveShadow = true;
+    boardGroup.add(f);
+  }
+
+  const hitGeo = new THREE.BoxGeometry(s * 0.98, bh + 1.6, 1.6);
+  hitboxes = [];
+  for (let c = 0; c < W; c++) {
+    const hb = new THREE.Mesh(hitGeo, mats.hit);
+    hb.position.set(cx(c), (bh + 1.6) / 2, 0);
+    hb.userData.col = c;
+    boardGroup.add(hb);
+    hitboxes.push(hb);
+  }
+
+  const discGeo = discGeometry(0, 0.42, 0.25);
+  discGeo.rotateX(Math.PI / 2);
+
+  return {
+    cfg: { W, H, D: 1 },
+    cellPos: (c, r) => new THREE.Vector3(cx(c), cy(r), 0),
+    dropY: bh + 0.7,
+    discGeo,
+    camPos: new THREE.Vector3(0, 5.2, 12.5),
+    camTarget: new THREE.Vector3(0, 3.3, 0),
+    minDist: 5, maxDist: 26,
+  };
+}
+
+function buildCube() {
+  const W = 4, H = 4, D = 4, sp = 1.3, ch = 0.36, baseH = 0.3, pegH = H * ch + 0.4;
+  const baseSize = (W - 1) * sp + 1.7;
+  const px = (c) => ((c % W) - (W - 1) / 2) * sp;
+  const pz = (c) => (Math.floor(c / W) - (D - 1) / 2) * sp;
+
+  const base = new THREE.Mesh(new THREE.BoxGeometry(baseSize, baseH, baseSize), mats.board);
+  base.position.y = baseH / 2;
+  base.castShadow = base.receiveShadow = true;
+  boardGroup.add(base);
+
+  const pegGeo = new THREE.CylinderGeometry(0.1, 0.1, pegH, 24);
+  const hitGeo = new THREE.BoxGeometry(sp * 0.92, pegH + 1.0, sp * 0.92);
+  hitboxes = [];
+  for (let c = 0; c < W * D; c++) {
+    const peg = new THREE.Mesh(pegGeo, mats.peg);
+    peg.position.set(px(c), baseH + pegH / 2, pz(c));
+    peg.castShadow = true;
+    boardGroup.add(peg);
+    const hb = new THREE.Mesh(hitGeo, mats.hit);
+    hb.position.set(px(c), baseH + (pegH + 1.0) / 2, pz(c));
+    hb.userData.col = c;
+    boardGroup.add(hb);
+    hitboxes.push(hb);
+  }
+
+  const discGeo = discGeometry(0.16, 0.52, 0.17);
+
+  return {
+    cfg: { W, H, D },
+    cellPos: (c, r) => new THREE.Vector3(px(c), baseH + (r + 0.5) * ch, pz(c)),
+    dropY: baseH + pegH + 0.6,
+    discGeo,
+    camPos: new THREE.Vector3(6.8, 5.6, 8.4),
+    camTarget: new THREE.Vector3(0, 1.1, 0),
+    minDist: 4, maxDist: 22,
+  };
+}
+
+// ---------- Estado de la partida ----------
+const game = {
+  mode: 'classic', level: 3, starter: 'human', nextFirst: 1,
+  first: 1, engine: null, cells: null, heights: null, moves: [], turn: 1,
+  over: false, busy: false, winFx: null,
+};
+const score = { w: 0, d: 0, l: 0 };
+try { Object.assign(score, JSON.parse(localStorage.getItem('c4-3d-score') || '{}')); } catch (e) { /* sin almacenamiento */ }
+
+const ghost = new THREE.Mesh(new THREE.BufferGeometry(), mats.ghost);
+ghost.visible = false;
+scene.add(ghost);
+
+const anims = [];
+let pendingAi = 0;
+
+function setMode(mode, keepCamera) {
+  game.mode = mode;
+  disposeGroup(boardGroup);
+  if (layout) layout.discGeo.dispose();
+  layout = mode === 'cube' ? buildCube() : buildClassic();
+  game.engine = createEngine(layout.cfg);
+  ghost.geometry = layout.discGeo;
+  controls.minDistance = layout.minDist;
+  controls.maxDistance = layout.maxDist;
+  if (!keepCamera) resetCamera();
+  for (const b of $('modeSeg').querySelectorAll('button')) b.classList.toggle('on', b.dataset.v === mode);
+}
+
+function resetCamera() {
+  camera.position.copy(layout.camPos);
+  controls.target.copy(layout.camTarget);
+  controls.update();
+}
+
+function clearWinFx() {
+  if (!game.winFx) return;
+  scene.remove(game.winFx.tube);
+  game.winFx.tube.geometry.dispose();
+  for (const d of game.winFx.discs) { d.mesh.material = d.orig; d.mat.dispose(); }
+  game.winFx = null;
+}
+
+function newGame() {
+  pendingAi++;
+  clearWinFx();
+  anims.length = 0;
+  disposeGroupMeshesOnly(discGroup);
+  const E = game.engine;
+  game.cells = new Int8Array(E.N);
+  game.heights = new Int16Array(E.NC);
+  game.moves = [];
+  game.over = false;
+  game.busy = false;
+  if (game.starter === 'human') game.first = 1;
+  else if (game.starter === 'ai') game.first = 2;
+  else { game.first = game.nextFirst; game.nextFirst = 3 - game.nextFirst; }
+  game.turn = game.first;
+  updateUi();
+  if (game.turn === 2 && !game.replaying) aiMove();
+}
+
+function disposeGroupMeshesOnly(g) { g.clear(); }
+
+function makeDisc(p, c, r) {
+  const mesh = new THREE.Mesh(layout.discGeo, p === 1 ? mats.p1 : mats.p2);
+  mesh.castShadow = mesh.receiveShadow = true;
+  const pos = layout.cellPos(c, r);
+  mesh.position.copy(pos);
+  discGroup.add(mesh);
+  return mesh;
+}
+
+function place(c, p, animate) {
+  const E = game.engine;
+  if (game.heights[c] >= E.H) return;
+  const r = game.heights[c];
+  const cell = c * E.H + r;
+  game.cells[cell] = p;
+  game.heights[c]++;
+  const mesh = makeDisc(p, c, r);
+  game.moves.push({ c, p, cell, mesh });
+  ghost.visible = false;
+  const finish = () => afterMove(cell, p);
+  if (animate && !reducedMotion.matches) {
+    game.busy = true;
+    const y1 = mesh.position.y;
+    mesh.position.y = layout.dropY;
+    anims.push({ mesh, y1, v: 0, g: 42, bounces: 1, done: finish });
+  } else {
+    finish();
+  }
+  updateUi();
+}
+
+function afterMove(cell, p) {
+  game.busy = false;
+  const E = game.engine;
+  const win = E.findWin(game.cells, cell, p);
+  if (win) {
+    game.over = true;
+    showWin(win);
+    if (p === 1) score.w++; else score.l++;
+    saveScore();
+  } else if (game.moves.length === E.N) {
+    game.over = true;
+    score.d++;
+    saveScore();
+  } else {
+    game.turn = 3 - p;
+    if (game.turn === 2 && !game.replaying) aiMove();
+  }
+  updateUi();
+}
+
+function showWin(cellsWin) {
+  const E = game.engine;
+  const toPos = (cell) => layout.cellPos(Math.floor(cell / E.H), cell % E.H);
+  const a = toPos(cellsWin[0]), b = toPos(cellsWin[3]);
+  const dir = b.clone().sub(a);
+  const len = dir.length() + 0.9;
+  const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, len, 16), mats.win);
+  tube.position.copy(a).add(b).multiplyScalar(0.5);
+  tube.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.normalize());
+  scene.add(tube);
+  const discs = [];
+  for (const cell of cellsWin) {
+    const mv = game.moves.find((m) => m.cell === cell);
+    if (!mv) continue;
+    const mat = mv.mesh.material.clone();
+    mat.emissive.copy(mat.color);
+    mat.emissiveIntensity = 0.4;
+    discs.push({ mesh: mv.mesh, orig: mv.mesh.material, mat });
+    mv.mesh.material = mat;
+  }
+  game.winFx = { tube, discs, t: 0 };
+}
+
+function aiMove() {
+  game.busy = true;
+  const id = ++pendingAi;
+  const t0 = performance.now();
+  updateUi();
+  think({ cells: Array.from(game.cells), heights: Array.from(game.heights), player: 2, level: game.level, cfg: layout.cfg })
+    .then((res) => {
+      if (id !== pendingAi || game.over) return;
+      const wait = Math.max(0, 420 - (performance.now() - t0));
+      setTimeout(() => {
+        if (id !== pendingAi || game.over) return;
+        if (res.col < 0) { game.busy = false; updateUi(); return; }
+        game.lastInfo = res;
+        place(res.col, 2, true);
+      }, wait);
+    });
+}
+
+function humanMove(c) {
+  if (game.busy || game.over || game.turn !== 1) return;
+  if (game.heights[c] >= game.engine.H) { flash('Esa columna está llena'); return; }
+  place(c, 1, true);
+}
+
+function undo() {
+  if (!game.moves.some((m) => m.p === 1)) return;
+  pendingAi++;
+  clearWinFx();
+  anims.length = 0;
+  const popOne = () => {
+    const m = game.moves.pop();
+    game.cells[m.cell] = 0;
+    game.heights[m.c]--;
+    discGroup.remove(m.mesh);
+    return m;
+  };
+  const last = popOne();
+  if (last.p === 2 && game.moves.length) popOne();
+  game.over = false;
+  game.busy = false;
+  game.turn = game.moves.length ? 3 - game.moves[game.moves.length - 1].p : game.first;
+  game.lastInfo = null;
+  updateUi();
+  if (game.turn === 2) aiMove();
+}
+
+function saveScore() {
+  try { localStorage.setItem('c4-3d-score', JSON.stringify(score)); } catch (e) { /* ignorar */ }
+}
+
+// ---------- UI ----------
+let flashTimer = 0;
+function flash(text) {
+  $('info').textContent = text;
+  clearTimeout(flashTimer);
+  flashTimer = setTimeout(updateUi, 1600);
+}
+
+function fmtNodes(n) {
+  if (n >= 1e6) return (n / 1e6).toFixed(1).replace('.', ',') + ' M';
+  if (n >= 1e3) return Math.round(n / 1e3) + ' mil';
+  return String(n);
+}
+
+function updateUi() {
+  const chip = $('chip'), msg = $('msg'), info = $('info');
+  chip.className = 'chip';
+  if (game.over) {
+    const last = game.moves[game.moves.length - 1];
+    const win = game.winFx != null;
+    if (!win) { msg.textContent = 'Empate: tablero lleno'; chip.classList.add('off'); }
+    else if (last.p === 1) { msg.textContent = '¡Has ganado!'; }
+    else { msg.textContent = 'Gana la máquina'; chip.classList.add('p2'); }
+  } else if (game.turn === 2) {
+    msg.textContent = 'La máquina piensa…';
+    chip.classList.add('p2');
+  } else {
+    msg.textContent = 'Tu turno';
+  }
+  const li = game.lastInfo;
+  info.textContent = li && li.depth ? `Última jugada: profundidad ${li.depth} · ${fmtNodes(li.nodes)} posiciones · ${li.ms} ms` : (game.moves.length ? `Jugada ${game.moves.length}` : 'Toca una columna para empezar');
+  $('sW').textContent = score.w;
+  $('sD').textContent = score.d;
+  $('sL').textContent = score.l;
+  $('undoBtn').disabled = !game.moves.some((m) => m.p === 1);
+  $('levelHint').textContent = LEVEL_HINTS[game.level];
+}
+
+$('newBtn').addEventListener('click', newGame);
+$('undoBtn').addEventListener('click', undo);
+$('camBtn').addEventListener('click', resetCamera);
+$('toggleBtn').addEventListener('click', () => $('panel').classList.toggle('open'));
+$('level').addEventListener('change', (e) => { game.level = Number(e.target.value); updateUi(); });
+$('modeSeg').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b || b.dataset.v === game.mode) return;
+  setMode(b.dataset.v);
+  newGame();
+});
+$('starterSeg').addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  game.starter = b.dataset.v;
+  if (game.starter === 'alt') game.nextFirst = 3 - game.first;
+  for (const x of $('starterSeg').querySelectorAll('button')) x.classList.toggle('on', x === b);
+  if (game.moves.length === 0 || game.over) newGame();
+});
+
+// ---------- Interacción con el tablero ----------
+const raycaster = new THREE.Raycaster();
+const ndc = new THREE.Vector2();
+let hoverCol = -1;
+let down = null;
+
+function pickCol(ev) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  ndc.set(((ev.clientX - rect.left) / rect.width) * 2 - 1, -((ev.clientY - rect.top) / rect.height) * 2 + 1);
+  raycaster.setFromCamera(ndc, camera);
+  const hit = raycaster.intersectObjects(hitboxes, false)[0];
+  return hit ? hit.object.userData.col : -1;
+}
+
+function updateGhost() {
+  const canPlay = !game.busy && !game.over && game.turn === 1 && hoverCol >= 0 && game.heights[hoverCol] < game.engine.H;
+  ghost.visible = canPlay;
+  renderer.domElement.style.cursor = canPlay ? 'pointer' : '';
+  if (canPlay) {
+    const p = layout.cellPos(hoverCol, 0);
+    ghost.position.set(p.x, layout.dropY, p.z);
+  }
+}
+
+renderer.domElement.addEventListener('pointermove', (ev) => {
+  if (ev.pointerType === 'touch') return;
+  hoverCol = pickCol(ev);
+  updateGhost();
+});
+renderer.domElement.addEventListener('pointerleave', () => { hoverCol = -1; updateGhost(); });
+renderer.domElement.addEventListener('pointerdown', (ev) => { down = { x: ev.clientX, y: ev.clientY, t: performance.now() }; });
+renderer.domElement.addEventListener('pointerup', (ev) => {
+  if (!down) return;
+  const moved = Math.hypot(ev.clientX - down.x, ev.clientY - down.y);
+  const dt = performance.now() - down.t;
+  down = null;
+  if (moved > 8 || dt > 600) return;
+  const c = pickCol(ev);
+  if (c >= 0) humanMove(c);
+  hoverCol = ev.pointerType === 'touch' ? -1 : c;
+  updateGhost();
+});
+window.addEventListener('keydown', (ev) => {
+  if (ev.target.tagName === 'SELECT' || ev.target.tagName === 'INPUT') return;
+  const n = Number(ev.key);
+  if (game.mode === 'classic' && n >= 1 && n <= 7) humanMove(n - 1);
+});
+
+// ---------- Bucle ----------
+function resize() {
+  const w = stage.clientWidth, h = stage.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(stage);
+resize();
+
+const clock = new THREE.Clock();
+function tick() {
+  requestAnimationFrame(tick);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  controls.update();
+  for (let i = anims.length - 1; i >= 0; i--) {
+    const a = anims[i];
+    a.v += a.g * dt;
+    a.mesh.position.y -= a.v * dt;
+    if (a.mesh.position.y <= a.y1) {
+      a.mesh.position.y = a.y1;
+      if (a.bounces > 0 && a.v > 2) { a.v = -a.v * 0.22; a.bounces--; }
+      else { anims.splice(i, 1); a.done(); }
+    }
+  }
+  if (game.winFx) {
+    game.winFx.t += dt;
+    const k = 0.35 + 0.35 * Math.sin(game.winFx.t * 4);
+    for (const d of game.winFx.discs) d.mat.emissiveIntensity = k;
+    mats.win.opacity = 0.6 + 0.3 * Math.sin(game.winFx.t * 4);
+  }
+  if (ghost.visible) ghost.position.y = layout.dropY + 0.08 * Math.sin(clock.elapsedTime * 3);
+  renderer.render(scene, camera);
+}
+
+// ---------- Arranque (con restauración si la página se actualiza en caliente) ----------
+function snapshot() {
+  return { mode: game.mode, level: game.level, starter: game.starter, first: game.first, nextFirst: game.nextFirst, moves: game.moves.map((m) => m.c) };
+}
+function start(data) {
+  game.level = Number(data.level) || 3;
+  $('level').value = String(game.level);
+  game.starter = data.starter || 'human';
+  for (const x of $('starterSeg').querySelectorAll('button')) x.classList.toggle('on', x.dataset.v === game.starter);
+  setMode(data.mode === 'cube' ? 'cube' : 'classic');
+  if (data.first) {
+    game.first = data.first;
+    game.nextFirst = data.nextFirst || 3 - data.first;
+  }
+  game.replaying = true;
+  newGame();
+  if (Array.isArray(data.moves)) {
+    let p = game.first;
+    const E = game.engine;
+    for (const c of data.moves) {
+      if (game.over || c < 0 || c >= E.NC || game.heights[c] >= E.H) break;
+      place(c, p, false);
+      p = 3 - p;
+    }
+  }
+  game.replaying = false;
+  if (!game.over && game.turn === 2) aiMove();
+  updateUi();
+  tick();
+}
+window.claude?.hot?.snapshot?.(snapshot);
+if (window.claude?.hot?.ready) window.claude.hot.ready(start);
+else start(window.claude?.hot?.data ?? {});
+</script>
+</body>
+</html>
