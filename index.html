@@ -106,7 +106,8 @@
   }
   .hint { margin: 0; font-size: 12px; color: var(--muted); }
 
-  .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .actions { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .actions button[aria-pressed="false"] { color: var(--muted); text-decoration: line-through; }
   .actions button {
     border: 1px solid var(--border); border-radius: 10px; padding: 9px 10px; cursor: pointer;
     background: var(--seg-on); color: var(--fg); font: 600 13px var(--font-body);
@@ -128,6 +129,7 @@
   @media (max-width: 719px) {
     #ui { align-items: flex-end; }
     #panel { width: 100%; padding: 14px; gap: 10px; max-height: 70vh; }
+    .actions { grid-template-columns: repeat(2, 1fr); }
     h1 { font-size: 20px; }
     #panel:not(.open) .field, #panel:not(.open) .score, #panel:not(.open) .help { display: none; }
     #toggleBtn { display: block; }
@@ -153,8 +155,9 @@
     <div class="actions">
       <button id="newBtn" class="primary" type="button">Nueva partida</button>
       <button id="undoBtn" type="button">Deshacer</button>
+      <button id="camBtn" type="button">Cámara</button>
+      <button id="soundBtn" type="button" aria-pressed="true">Sonido</button>
       <button id="toggleBtn" type="button">Ajustes</button>
-      <button id="camBtn" type="button">Centrar cámara</button>
     </div>
 
     <div class="field">
@@ -192,7 +195,7 @@
       <div class="p2"><dt>Máquina</dt><dd id="sL">0</dd></div>
     </dl>
 
-    <p class="help">Arrastra para girar la escena y usa la rueda o la pinza para acercar. Toca una columna para soltar tu ficha. En el tablero clásico también sirven las teclas 1 a 7.</p>
+    <p class="help">Arrastra para girar la escena y usa la rueda o la pinza para acercar. Con ratón, pasa por una columna y haz clic para soltar la ficha. Con pantalla táctil, un toque elige la columna y un segundo toque la suelta. En el tablero clásico también sirven las teclas 1 a 7.</p>
   </aside>
 </div>
 
@@ -431,6 +434,63 @@ function think(payload) {
   });
 }
 
+// ---------- Sonido (sintetizado con Web Audio, sin archivos) ----------
+const sfx = {
+  ctx: null, enabled: true,
+  ensure() {
+    if (!this.enabled) return null;
+    if (!this.ctx) {
+      try { this.ctx = new (window.AudioContext || window.webkitAudioContext)(); } catch (e) { return null; }
+    }
+    if (this.ctx.state === 'suspended') this.ctx.resume();
+    return this.ctx;
+  },
+  tone(freq, dur, { type = 'sine', gain = 0.25, at = 0, slide = null } = {}) {
+    const ctx = this.ensure();
+    if (!ctx) return;
+    const t0 = ctx.currentTime + at;
+    const o = ctx.createOscillator(), g = ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t0);
+    if (slide) o.frequency.exponentialRampToValueAtTime(slide, t0 + dur);
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(gain, t0 + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    o.connect(g).connect(ctx.destination);
+    o.start(t0); o.stop(t0 + dur + 0.02);
+  },
+  noise(dur, { gain = 0.2, freq = 1800, at = 0 } = {}) {
+    const ctx = this.ensure();
+    if (!ctx) return;
+    const n = Math.floor(ctx.sampleRate * dur);
+    const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / n);
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const bp = ctx.createBiquadFilter();
+    bp.type = 'bandpass'; bp.frequency.value = freq; bp.Q.value = 0.8;
+    const g = ctx.createGain();
+    g.gain.value = gain;
+    src.connect(bp).connect(g).connect(ctx.destination);
+    src.start(ctx.currentTime + at);
+  },
+  play(name) {
+    if (!this.enabled) return;
+    switch (name) {
+      case 'land': this.noise(0.06, { gain: 0.35, freq: 2200 }); this.tone(170, 0.14, { type: 'triangle', gain: 0.35, slide: 60 }); break;
+      case 'bounce': this.noise(0.04, { gain: 0.15, freq: 2600 }); this.tone(220, 0.08, { type: 'triangle', gain: 0.15, slide: 90 }); break;
+      case 'tick': this.tone(1400, 0.04, { gain: 0.07 }); break;
+      case 'invalid': this.tone(130, 0.14, { type: 'square', gain: 0.1 }); break;
+      case 'win': [523, 659, 784, 1047].forEach((f, i) => this.tone(f, 0.22, { gain: 0.25, at: i * 0.12 })); break;
+      case 'lose': [392, 311, 233].forEach((f, i) => this.tone(f, 0.3, { type: 'triangle', gain: 0.22, at: i * 0.18 })); break;
+      case 'draw': [440, 440].forEach((f, i) => this.tone(f, 0.18, { gain: 0.2, at: i * 0.22 })); break;
+    }
+  },
+};
+try { sfx.enabled = localStorage.getItem('c4-3d-sound') !== 'off'; } catch (e) { /* sin almacenamiento */ }
+window.addEventListener('pointerdown', () => sfx.ensure(), { passive: true });
+
 // ---------- Escena ----------
 const stage = $('stage');
 const renderer = new THREE.WebGLRenderer({ canvas: $('c'), antialias: true });
@@ -517,6 +577,10 @@ const mats = {
   p1: discMat(),
   p2: discMat(),
   ghost: new THREE.MeshStandardMaterial({ transparent: true, opacity: 0.45, depthWrite: false }),
+  landing: new THREE.MeshStandardMaterial({ transparent: true, opacity: 0.4, depthWrite: false }),
+  mark: new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.4, depthWrite: false }),
+  guide: new THREE.LineBasicMaterial({ transparent: true, opacity: 0.55 }),
+  pegHi: new THREE.MeshStandardMaterial({ roughness: 0.4, emissiveIntensity: 0.5 }),
   hit: new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false }),
   ground: new THREE.MeshStandardMaterial({ roughness: 1 }),
   win: new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 }),
@@ -535,6 +599,11 @@ function applyTheme() {
   mats.board.color.set(token('--board'));
   mats.p1.color.set(token('--p1'));
   mats.p2.color.set(token('--p2'));
+  mats.ghost.color.set(token('--p1'));
+  mats.landing.color.set(token('--p1'));
+  mats.guide.color.set(token('--p1'));
+  mats.pegHi.color.set(token('--p1'));
+  mats.pegHi.emissive.set(token('--p1'));
 }
 applyTheme();
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', applyTheme);
@@ -617,11 +686,13 @@ function buildCube() {
   const pegGeo = new THREE.CylinderGeometry(0.1, 0.1, pegH, 24);
   const hitGeo = new THREE.BoxGeometry(sp * 0.92, pegH + 1.0, sp * 0.92);
   hitboxes = [];
+  const pegs = [];
   for (let c = 0; c < W * D; c++) {
     const peg = new THREE.Mesh(pegGeo, mats.peg);
     peg.position.set(px(c), baseH + pegH / 2, pz(c));
     peg.castShadow = true;
     boardGroup.add(peg);
+    pegs.push(peg);
     const hb = new THREE.Mesh(hitGeo, mats.hit);
     hb.position.set(px(c), baseH + (pegH + 1.0) / 2, pz(c));
     hb.userData.col = c;
@@ -635,7 +706,7 @@ function buildCube() {
     cfg: { W, H, D },
     cellPos: (c, r) => new THREE.Vector3(px(c), baseH + (r + 0.5) * ch, pz(c)),
     dropY: baseH + pegH + 0.6,
-    discGeo,
+    discGeo, pegs, baseTop: baseH,
     camPos: new THREE.Vector3(6.8, 5.6, 8.4),
     camTarget: new THREE.Vector3(0, 1.1, 0),
     minDist: 4, maxDist: 22,
@@ -652,8 +723,13 @@ const score = { w: 0, d: 0, l: 0 };
 try { Object.assign(score, JSON.parse(localStorage.getItem('c4-3d-score') || '{}')); } catch (e) { /* sin almacenamiento */ }
 
 const ghost = new THREE.Mesh(new THREE.BufferGeometry(), mats.ghost);
-ghost.visible = false;
-scene.add(ghost);
+const landing = new THREE.Mesh(new THREE.BufferGeometry(), mats.landing);
+const mark = new THREE.Mesh(new THREE.CircleGeometry(0.62, 48), mats.mark);
+mark.rotation.x = -Math.PI / 2;
+const guide = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]), mats.guide);
+ghost.visible = landing.visible = mark.visible = guide.visible = false;
+scene.add(ghost, landing, mark, guide);
+let hiPeg = null;
 
 const anims = [];
 let pendingAi = 0;
@@ -665,6 +741,8 @@ function setMode(mode, keepCamera) {
   layout = mode === 'cube' ? buildCube() : buildClassic();
   game.engine = createEngine(layout.cfg);
   ghost.geometry = layout.discGeo;
+  landing.geometry = layout.discGeo;
+  hiPeg = null;
   controls.minDistance = layout.minDist;
   controls.maxDistance = layout.maxDist;
   if (!keepCamera) resetCamera();
@@ -700,6 +778,8 @@ function newGame() {
   else if (game.starter === 'ai') game.first = 2;
   else { game.first = game.nextFirst; game.nextFirst = 3 - game.nextFirst; }
   game.turn = game.first;
+  touchSel = -1; hoverCol = -1;
+  updateGhost();
   updateUi();
   if (game.turn === 2 && !game.replaying) aiMove();
 }
@@ -732,6 +812,7 @@ function place(c, p, animate) {
     mesh.position.y = layout.dropY;
     anims.push({ mesh, y1, v: 0, g: 42, bounces: 1, done: finish });
   } else {
+    if (animate) sfx.play('land');
     finish();
   }
   updateUi();
@@ -746,10 +827,12 @@ function afterMove(cell, p) {
     showWin(win);
     if (p === 1) score.w++; else score.l++;
     saveScore();
+    if (!game.replaying) sfx.play(p === 1 ? 'win' : 'lose');
   } else if (game.moves.length === E.N) {
     game.over = true;
     score.d++;
     saveScore();
+    if (!game.replaying) sfx.play('draw');
   } else {
     game.turn = 3 - p;
     if (game.turn === 2 && !game.replaying) aiMove();
@@ -800,7 +883,7 @@ function aiMove() {
 
 function humanMove(c) {
   if (game.busy || game.over || game.turn !== 1) return;
-  if (game.heights[c] >= game.engine.H) { flash('Esa columna está llena'); return; }
+  if (game.heights[c] >= game.engine.H) { flash('Esa columna está llena'); sfx.play('invalid'); return; }
   place(c, 1, true);
 }
 
@@ -871,6 +954,14 @@ function updateUi() {
 $('newBtn').addEventListener('click', newGame);
 $('undoBtn').addEventListener('click', undo);
 $('camBtn').addEventListener('click', resetCamera);
+function updateSoundBtn() { $('soundBtn').setAttribute('aria-pressed', String(sfx.enabled)); }
+$('soundBtn').addEventListener('click', () => {
+  sfx.enabled = !sfx.enabled;
+  try { localStorage.setItem('c4-3d-sound', sfx.enabled ? 'on' : 'off'); } catch (e) { /* ignorar */ }
+  updateSoundBtn();
+  if (sfx.enabled) sfx.play('tick');
+});
+updateSoundBtn();
 $('toggleBtn').addEventListener('click', () => $('panel').classList.toggle('open'));
 $('level').addEventListener('change', (e) => { game.level = Number(e.target.value); updateUi(); });
 $('modeSeg').addEventListener('click', (e) => {
@@ -892,6 +983,7 @@ $('starterSeg').addEventListener('click', (e) => {
 const raycaster = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
 let hoverCol = -1;
+let touchSel = -1;
 let down = null;
 
 function pickCol(ev) {
@@ -904,11 +996,21 @@ function pickCol(ev) {
 
 function updateGhost() {
   const canPlay = !game.busy && !game.over && game.turn === 1 && hoverCol >= 0 && game.heights[hoverCol] < game.engine.H;
-  ghost.visible = canPlay;
+  const cube = game.mode === 'cube';
+  ghost.visible = landing.visible = canPlay;
+  mark.visible = guide.visible = canPlay && cube;
   renderer.domElement.style.cursor = canPlay ? 'pointer' : '';
-  if (canPlay) {
-    const p = layout.cellPos(hoverCol, 0);
-    ghost.position.set(p.x, layout.dropY, p.z);
+  if (hiPeg) { hiPeg.material = mats.peg; hiPeg = null; }
+  if (!canPlay) return;
+  const top = layout.cellPos(hoverCol, 0);
+  const target = layout.cellPos(hoverCol, game.heights[hoverCol]);
+  ghost.position.set(top.x, layout.dropY, top.z);
+  landing.position.copy(target);
+  if (cube) {
+    mark.position.set(top.x, layout.baseTop + 0.006, top.z);
+    guide.geometry.setFromPoints([new THREE.Vector3(top.x, layout.dropY - 0.25, top.z), new THREE.Vector3(target.x, target.y + 0.25, target.z)]);
+    hiPeg = layout.pegs[hoverCol];
+    hiPeg.material = mats.pegHi;
   }
 }
 
@@ -926,8 +1028,13 @@ renderer.domElement.addEventListener('pointerup', (ev) => {
   down = null;
   if (moved > 8 || dt > 600) return;
   const c = pickCol(ev);
-  if (c >= 0) humanMove(c);
-  hoverCol = ev.pointerType === 'touch' ? -1 : c;
+  if (ev.pointerType === 'touch') {
+    if (c >= 0 && c === touchSel) { touchSel = -1; hoverCol = -1; humanMove(c); }
+    else { touchSel = c; hoverCol = c; if (c >= 0) sfx.play('tick'); }
+  } else {
+    if (c >= 0) humanMove(c);
+    hoverCol = c;
+  }
   updateGhost();
 });
 window.addEventListener('keydown', (ev) => {
@@ -957,8 +1064,8 @@ function tick() {
     a.mesh.position.y -= a.v * dt;
     if (a.mesh.position.y <= a.y1) {
       a.mesh.position.y = a.y1;
-      if (a.bounces > 0 && a.v > 2) { a.v = -a.v * 0.22; a.bounces--; }
-      else { anims.splice(i, 1); a.done(); }
+      if (a.bounces > 0 && a.v > 2) { a.v = -a.v * 0.22; a.bounces--; sfx.play('bounce'); }
+      else { anims.splice(i, 1); sfx.play('land'); a.done(); }
     }
   }
   if (game.winFx) {
